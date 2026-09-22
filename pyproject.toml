@@ -39,8 +39,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = ""
-Repository = ""
+Homepage = "https://github.com/sikauk-rad/databricks_catalog_schema_table_name"
+Repository = "https://github.com/sikauk-rad/databricks_catalog_schema_table_name"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/databricks_catalog_schema_table_name"]

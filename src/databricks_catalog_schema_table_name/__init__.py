@@ -1,6 +1,8 @@
-from .models import TableName, CatalogSchemaTable
+from .models import CatalogName, SchemaName, TableName, CatalogSchemaTable
 
 __all__ = [
+    'CatalogName',
+    'SchemaName',
     'TableName',
     'CatalogSchemaTable',
 ]

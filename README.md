@@ -1,338 +1,256 @@
 # databricks_catalog_schema_table_name
 
-Simple object-oriented management of Databricks catalog-schema-table names.
+A small Python helper for working with Databricks table names like:
 
-This package provides small immutable models for working with:
+```
+main.sales.bronze__customers
+```
 
-- table names with optional prefixes and suffixes
-- fully qualified Databricks table references in the form `catalog.schema.table`
+Instead of gluing text together by hand, you describe each piece once. 
+The package builds the full name for you and checks for common mistakes.
 
-It is especially useful when you want to manipulate names safely and consistently instead of hand-building strings everywhere.
+---
 
-## Features
+## What is a "catalog.schema.table" name?
 
-- Immutable models using [`msgspec.Struct`](https://jcristharif.com/msgspec/)
-- Clear object model for:
-  - `TableName`
-  - `CatalogSchemaTable`
-- Easy string conversion with `str(...)`
-- Convenient `with_*` methods for non-mutating updates
-- Parsing from strings with configurable separators
+In Databricks, every table has a three-part address, separated by dots:
+
+```
+  catalog   .  schema  .  table
+  main      .  sales   .  bronze__customers
+```
+
+Each part can have smaller pieces of its own:
+
+| Part        | Pieces it can have                | Example               |
+|-------------|-----------------------------------|-----------------------|
+| **Catalog** | name, optional suffix             | `sales_dev`           |
+| **Schema**  | name, optional suffix             | `reporting_core`      |
+| **Table**   | optional prefix, name, optional suffix | `bronze__customers` |
+
+- A **prefix** goes in front of the name (for example `bronze`, `silver`, `gold`).
+- A **suffix** goes after the name (for example `dev`, `prod`, `hist`).
+- A **separator** is the text placed between pieces (for example `_` or `__`).
+
+---
 
 ## Installation
+
+You need **Python 3.11 or newer**.
 
 ```bash
 pip install databricks_catalog_schema_table_name
 ```
 
-## Quick start
+---
+
+## 1. Build a full table name
 
 ```python
-from databricks_catalog_schema_table_name import TableName, CatalogSchemaTable
-
-table = TableName(prefix="bronze", name="customers")
-print(str(table))
-# bronze__customers
+from databricks_catalog_schema_table_name import (
+    CatalogName,
+    SchemaName,
+    TableName,
+    CatalogSchemaTable,
+)
 
 ref = CatalogSchemaTable(
-    catalog="main",
-    schema="sales",
-    table=table,
-)
-print(str(ref))
-# main.sales.bronze__customers
-```
-
-## Models
-
-### `TableName`
-
-Represents a table name with optional:
-
-- `prefix`
-- `name`
-- `suffix`
-- `prefix_separator`
-- `suffix_separator`
-
-Example:
-
-```python
-from databricks_catalog_schema_table_name import TableName
-
-table = TableName(prefix="silver", name="orders")
-print(str(table))
-# silver__orders
-```
-
-With suffix:
-
-```python
-table = TableName(
-    prefix="silver",
-    name="orders",
-    suffix="hist",
-    prefix_separator="__",
-    suffix_separator="_",
-)
-print(str(table))
-# silver__orders_hist
-```
-
-### `CatalogSchemaTable`
-
-Represents a fully qualified Databricks table reference:
-
-```python
-from databricks_catalog_schema_table_name import TableName, CatalogSchemaTable
-
-ref = CatalogSchemaTable(
-    catalog="main",
-    schema="analytics",
-    table=TableName(prefix="gold", name="customers"),
-)
-
-print(str(ref))
-# main.analytics.gold__customers
-```
-
-## Parsing from strings
-
-### Parse a `TableName`
-
-```python
-from databricks_catalog_schema_table_name import TableName
-
-table = TableName.from_string("bronze__customers")
-print(table)
-# TableName(prefix='bronze', name='customers', suffix=None, prefix_separator='__', suffix_separator='')
-```
-
-With suffix parsing:
-
-```python
-table = TableName.from_string(
-    "silver__orders_hist",
-    prefix_separator="__",
-    suffix_separator="_",
-)
-
-print(table.prefix)
-# silver
-
-print(table.name)
-# orders
-
-print(table.suffix)
-# hist
-```
-
-### Parse a `CatalogSchemaTable`
-
-```python
-from databricks_catalog_schema_table_name import CatalogSchemaTable
-
-ref = CatalogSchemaTable.from_string("main.sales.bronze__customers")
-
-print(ref.catalog)
-# main
-
-print(ref.schema)
-# sales
-
-print(str(ref.table))
-# bronze__customers
-```
-
-## Non-mutating updates
-
-All models are frozen/immutable. To make changes, use the provided `with_*` methods.
-
-### Update `TableName`
-
-```python
-from databricks_catalog_schema_table_name import TableName
-
-table = TableName(prefix="bronze", name="customers")
-new_table = table.with_prefix("silver")
-
-print(str(table))
-# bronze__customers
-
-print(str(new_table))
-# silver__customers
-```
-
-Other examples:
-
-```python
-table = table.with_name("orders")
-table = table.with_suffix("hist")
-table = table.with_suffix_separator("_")
-```
-
-### Update `CatalogSchemaTable`
-
-```python
-from databricks_catalog_schema_table_name import TableName, CatalogSchemaTable
-
-ref = CatalogSchemaTable(
-    catalog="main",
-    schema="sales",
+    catalog=CatalogName(name="sales", suffix="dev"),
+    schema=SchemaName(name="reporting"),
     table=TableName(prefix="bronze", name="customers"),
 )
 
-updated = ref.with_catalog("prod").with_schema("analytics")
-print(str(updated))
-# prod.analytics.bronze__customers
+print(ref)
+# sales_dev.reporting.bronze__customers
 ```
 
-Update the nested table:
+Use it directly in Spark:
 
 ```python
-updated = ref.with_table_prefix("silver")
-print(str(updated))
-# main.sales.silver__customers
+df = spark.table(ref.str)
 ```
 
-Or replace the table directly:
+> `ref.str` and `str(ref)` both give you the full name as text.
+
+---
+
+## 2. Read an existing table name
+
+Already have the name as text? Turn it into an object:
 
 ```python
-updated = ref.with_table("gold__orders")
-print(str(updated))
-# main.sales.gold__orders
+ref = CatalogSchemaTable.from_string("sales_dev.reporting.bronze__customers")
+
+print(ref.catalog.name)    # sales
+print(ref.catalog.suffix)  # dev
+print(ref.schema.name)     # reporting
+print(ref.table.prefix)    # bronze
+print(ref.table.name)      # customers
 ```
 
-You can also pass a `TableName` instance:
+---
+
+## 3. Change one piece
+
+Objects never change in place. Each `with_...` method gives you a **new** object,
+and the original stays the same.
 
 ```python
-updated = ref.with_table(TableName(prefix="gold", name="orders"))
-print(str(updated))
-# main.sales.gold__orders
+ref = CatalogSchemaTable.from_string("sales_dev.reporting.bronze__customers")
+
+# Move from dev to prod
+prod = ref.with_catalog(ref.catalog.with_suffix("prod"))
+print(prod)   # sales_prod.reporting.bronze__customers
+
+# Move from bronze to silver
+silver = ref.with_table_prefix("silver")
+print(silver) # sales_dev.reporting.silver__customers
+
+# Point to a different table
+orders = ref.with_table("gold__orders")
+print(orders) # sales_dev.reporting.gold__orders
+
+# The original is untouched
+print(ref)    # sales_dev.reporting.bronze__customers
 ```
 
-## API overview
-
-### `TableName`
-
-Main fields:
-
-- `prefix: str | None`
-- `name: str`
-- `suffix: str | None = None`
-- `prefix_separator: str = "__"`
-- `suffix_separator: str = ""`
-
-Main methods:
-
-- `str(table)` or `table.str`
-- `TableName.from_string(...)`
-- `with_prefix(...)`
-- `with_name(...)`
-- `with_suffix(...)`
-- `with_prefix_separator(...)`
-- `with_suffix_separator(...)`
-
-### `CatalogSchemaTable`
-
-Main fields:
-
-- `catalog: str`
-- `schema: str`
-- `table: TableName`
-
-Main methods:
-
-- `str(ref)` or `ref.str`
-- `CatalogSchemaTable.from_string(...)`
-- `with_catalog(...)`
-- `with_schema(...)`
-- `with_table(...)`
-- `with_table_attribute(...)`
-- `with_table_prefix(...)`
-- `with_table_name(...)`
-- `with_table_suffix(...)`
-- `with_table_prefix_separator(...)`
-- `with_table_suffix_separator(...)`
-
-## Error behavior
-
-### Invalid field replacement
-
-If you call `with_attribute(...)` or `with_table_attribute(...)` with a field name that does not exist, a `TypeError` is raised.
-
-### Parsing errors
-
-Parsing methods raise `ValueError` when expected separators are not found.
-
-Example:
+You can chain several changes:
 
 ```python
-from databricks_catalog_schema_table_name import TableName
-
-TableName.from_string("customers", prefix_separator="__")
-# ValueError: prefix_separator = '__' not found.
+new = ref.with_catalog("main").with_schema("analytics").with_table_name("orders")
+print(new)    # main.analytics.bronze__orders
 ```
 
-## Why use this package?
+### All the "change" methods
 
-Instead of writing code like this:
+| On a full reference (`CatalogSchemaTable`) | What it changes        |
+|--------------------------------------------|------------------------|
+| `with_catalog(...)`                        | the catalog            |
+| `with_schema(...)`                         | the schema             |
+| `with_table(...)`                          | the whole table        |
+| `with_table_prefix(...)`                   | the table prefix       |
+| `with_table_name(...)`                     | the table name         |
+| `with_table_suffix(...)`                   | the table suffix       |
+| `with_table_prefix_separator(...)`         | text between prefix and name |
+| `with_table_suffix_separator(...)`         | text between name and suffix |
+
+`with_catalog`, `with_schema` and `with_table` accept either text or a ready-made
+`CatalogName` / `SchemaName` / `TableName`.
+
+`CatalogName`, `SchemaName` and `TableName` have their own `with_name`,
+`with_suffix` and `with_suffix_separator` methods. `TableName` also has
+`with_prefix` and `with_prefix_separator`.
+
+To remove a prefix or suffix, pass `None`:
 
 ```python
-full_name = f"{catalog}.{schema}.{prefix}__{table}"
+ref.with_table_prefix(None)   # sales_dev.reporting.customers
 ```
 
-you can write:
+---
+
+## Default separators
+
+| Piece                         | Default separator | Example              |
+|-------------------------------|-------------------|----------------------|
+| Catalog name → suffix         | `_`               | `sales_dev`          |
+| Schema name → suffix          | `_`               | `reporting_core`     |
+| Table prefix → name           | `__` (two underscores) | `bronze__customers` |
+| Table name → suffix           | *(nothing)*       | `customershist`      |
+
+You can change any of them, for example:
 
 ```python
-ref = CatalogSchemaTable(
-    catalog=catalog,
-    schema=schema,
-    table=TableName(prefix=prefix, name=table),
+table = TableName(prefix="silver", name="orders", suffix="hist", suffix_separator="_")
+print(table)  # silver__orders_hist
+```
+
+---
+
+## Things to watch out for
+
+**1. Underscores in catalog and schema names.**
+When reading text, the **last** `_` is treated as the start of a suffix:
+
+```python
+ref = CatalogSchemaTable.from_string("my_catalog.my_schema.customers")
+print(ref.catalog.name)    # my
+print(ref.catalog.suffix)  # catalog
+```
+
+The full name is still correct (`my_catalog.my_schema.customers`).
+If you don't use suffixes, switch this off with `None`:
+
+```python
+ref = CatalogSchemaTable.from_string(
+    "my_catalog.my_schema.customers",
+    catalog_suffix_separator=None,
+    schema_suffix_separator=None,
 )
+print(ref.catalog.name)    # my_catalog
 ```
 
-This makes name handling:
+**2. Table suffixes are not read by default.**
+To read `orders_hist` as name `orders` + suffix `hist`, say so:
 
-- more explicit
-- easier to test
-- less error-prone
-- easier to refactor
+```python
+ref = CatalogSchemaTable.from_string(
+    "main.sales.silver__orders_hist",
+    table_suffix_separator="_",
+)
+print(ref.table.suffix)  # hist
+```
 
-## Requirements
+**3. Adding a table suffix with no separator.**
+The default table suffix separator is empty, so `with_table_suffix("hist")` gives
+`customershist`. To get `customers_hist`, set the separator too:
 
-- Python 3.10+
-- `msgspec`
+```python
+ref.with_table_attribute(suffix="hist", suffix_separator="_")
+```
 
-## Development
+**4. Missing separators are fine.**
+If the text has no prefix or suffix, that piece is simply left empty (`None`).
+No error is raised.
 
-Install with development dependencies:
+```python
+TableName.from_string("customers").prefix   # None
+```
+
+---
+
+## Errors you might see
+
+The package stops you from building broken names.
+
+| What you did                                  | Error        |
+|-----------------------------------------------|--------------|
+| Text with too few or too many dots (`main.sales`) | `ValueError: string must contain exactly two full stops.` |
+| An empty piece (`main..customers`, `__customers`) | `ValueError: ... must be a non-empty string` |
+| A dot inside a piece (`TableName(name="a.b")`) | `ValueError: ... must not contain .` |
+| Plain text where an object is needed (`CatalogSchemaTable(catalog="main", ...)`) | `TypeError: catalog must be an instance of CatalogName.` |
+| A field that doesn't exist (`with_attribute(wrong=1)`) | `TypeError: attributes not recognised: wrong` |
+
+> Tip: when building a `CatalogSchemaTable` from scratch, wrap the catalog and
+> schema in `CatalogName(...)` and `SchemaName(...)`. Or just use
+> `CatalogSchemaTable.from_string("catalog.schema.table")`.
+
+---
+
+## For developers
 
 ```bash
-pip install -e .[dev]
+pip install -e .[dev]   # install with dev tools
+pytest                  # run tests
+mypy src                # type checking
+ruff check .            # linting
 ```
 
-Run tests:
-
-```bash
-pytest
-```
-
-Type checking:
-
-```bash
-mypy src
-```
-
-Linting:
-
-```bash
-ruff check .
-```
+---
 
 ## License
 
-MIT license. 
+MIT
 
 ## Author
 
